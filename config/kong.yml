@@ -1,0 +1,10 @@
+_format_version: "3.0"
+_transform: true
+
+plugins:
+  - name: custom-auth
+    enabled: false
+    config:
+      validation_endpoint: "http://192.168.1.19:3001/auth/verify"  # Thay bằng URL API thực tế
+
+  

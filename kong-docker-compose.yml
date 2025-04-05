@@ -1,0 +1,120 @@
+x-kong-config:
+  &kong-env
+  KONG_DATABASE: ${KONG_DATABASE}
+  KONG_PG_DATABASE: ${KONG_PG_DATABASE}
+  KONG_PG_HOST: ${KONG_PG_HOST}
+  KONG_PG_USER: ${KONG_PG_USER}
+  KONG_PG_PASSWORD: ${KONG_PG_PASSWORD}
+  KONG_REDIS_HOST: redis  # Địa chỉ Redis dịch vụ mới
+  KONG_REDIS_PORT: 6379  # Port mặc định của Redis
+  KONG_REDIS_PASSWORD: "" # Nếu Redis có mật khẩu thì điền vào đây
+
+volumes:
+  kong_data: {}
+  kong_prefix_vol:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+  kong_tmp_vol:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+  redis_data: # Đảm bảo volume redis_data được khai báo ở đây
+    driver: local
+
+networks:
+  kong-net:
+    external: false
+
+services:
+  kong-migrations:
+    build:
+      context: .
+      dockerfile: Dockerfile  # Chỉ định Dockerfile tùy chỉnh
+    command: kong migrations bootstrap
+    depends_on:
+      - db
+    environment:
+      <<: *kong-env
+    networks:
+      - kong-net
+    restart: on-failure
+
+  kong-migrations-up:
+    build:
+      context: .
+      dockerfile: Dockerfile  # Chỉ định Dockerfile tùy chỉnh
+    command: kong migrations up && kong migrations finish
+    depends_on:
+      - db
+    environment:
+      <<: *kong-env
+    networks:
+      - kong-net
+    restart: on-failure
+
+  kong:
+    build:
+      context: .
+      dockerfile: Dockerfile  # Chỉ định Dockerfile tùy chỉnh
+    user: "${KONG_USER}"
+    environment:
+      <<: *kong-env
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_PROXY_LISTEN: "${KONG_PROXY_LISTEN}"
+      KONG_ADMIN_LISTEN: "${KONG_ADMIN_LISTEN}"
+      KONG_ADMIN_GUI_LISTEN: "${KONG_ADMIN_GUI_LISTEN}"
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_PREFIX: "${KONG_PREFIX}"
+    networks:
+      - kong-net
+    ports:
+      - "${KONG_INBOUND_PROXY_LISTEN}:8000:8000/tcp"
+      - "${KONG_INBOUND_SSL_PROXY_LISTEN}:8443:8443/tcp"
+      - "8001:8001/tcp"
+      - "8444:8444/tcp"
+      - "8002:8002/tcp"
+    healthcheck:
+      test: [ "CMD", "kong", "health" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    restart: on-failure:5
+    read_only: true
+    volumes:
+      - kong_prefix_vol:${KONG_PREFIX}
+      - kong_tmp_vol:/tmp
+      - ./config:/opt/kong
+    security_opt:
+      - no-new-privileges
+
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "pg_isready",
+          "-d",
+          "${POSTGRES_DB}",
+          "-U",
+          "${POSTGRES_USER}"
+        ]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    restart: on-failure
+    stdin_open: true
+    tty: true
+    networks:
+      - kong-net
+    volumes:
+      - kong_data:/var/lib/postgresql/data
+
+  
